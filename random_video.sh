@@ -6,15 +6,41 @@ VIDEO_DIR="./videos"
 # Duration of the random segment in seconds
 SEGMENT_DURATION=5
 
-# Temporary directories for short video clips and playlist file
+# Temporary directories for short video clips
 TEMP_DIR="./temp_clips"
-PLAYLIST_FILE="./temp_playlist.m3u"
-DEBUG_PLAYLIST_FILE="./debug_playlist.txt"  # File to save playlist for debugging
-
-# Create directories for temporary clips and saved clips if they don't exist
 mkdir -p "$TEMP_DIR"
 
-# Function to generate and play random 5-second segments from videos
+# IPC socket file for mpv
+MPV_SOCKET="/tmp/mpvsocket"
+
+# Set the desired window dimensions
+WINDOW_WIDTH=800
+WINDOW_HEIGHT=600
+
+# Variable to keep track of the last clip
+LAST_CLIP=""
+
+# Preload and return the path of a new clip
+preload_clip() {
+  RANDOM_VIDEO=${VIDEO_FILES[$RANDOM % ${#VIDEO_FILES[@]}]}
+  VIDEO_DURATION=$(ffprobe -v error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 "$RANDOM_VIDEO")
+  VIDEO_DURATION=${VIDEO_DURATION%.*}
+  if [ "$VIDEO_DURATION" -ge "$SEGMENT_DURATION" ]; then
+    if [ "$VIDEO_DURATION" -gt "$SEGMENT_DURATION" ]; then
+      START_TIME=$((RANDOM % (VIDEO_DURATION - SEGMENT_DURATION)))
+    else
+      START_TIME=0
+    fi
+    CLIP_NAME="$TEMP_DIR/clip_$(date +%s).mp4"
+    ffmpeg -ss "$START_TIME" -t "$SEGMENT_DURATION" -i "$RANDOM_VIDEO" -c:v libx264 -preset veryfast -crf 23 -c:a aac "$CLIP_NAME" -y
+    if [ -f "$CLIP_NAME" ]; then
+      echo '{ "command": ["loadfile", "'"$CLIP_NAME"'", "replace"] }' | socat - "$MPV_SOCKET"
+      LAST_CLIP="$CLIP_NAME"
+    fi
+  fi
+}
+
+# Function to play random 5-second segments from videos
 play_random_segments() {
   # List all video files in the directory
   VIDEO_FILES=("$VIDEO_DIR"/*)
@@ -25,8 +51,8 @@ play_random_segments() {
     exit 1
   fi
 
-  # Generate the playlist
-  > "$PLAYLIST_FILE" # Empty the playlist file
+  # Preload the first clip to avoid an initial gap
+  preload_clip
 
   while true; do
     # Randomly select a video file from the list
@@ -41,7 +67,11 @@ play_random_segments() {
     # Check if the video is longer than the segment duration
     if [ "$VIDEO_DURATION" -ge "$SEGMENT_DURATION" ]; then
       # Calculate a random start time for the segment
-      START_TIME=$((RANDOM % (VIDEO_DURATION - SEGMENT_DURATION)))
+      if [ "$VIDEO_DURATION" -gt "$SEGMENT_DURATION" ]; then
+        START_TIME=$((RANDOM % (VIDEO_DURATION - SEGMENT_DURATION)))
+      else
+        START_TIME=0
+      fi
       echo "Start time: $START_TIME seconds"
 
       # Generate a temporary clip file with absolute path
@@ -64,27 +94,20 @@ play_random_segments() {
         continue
       fi
 
-      # Add the clip to the playlist file with full path
-      ABSOLUTE_CLIP_PATH=$(readlink -f "$CLIP_NAME")
-      echo "$ABSOLUTE_CLIP_PATH" >> "$PLAYLIST_FILE"
-      echo "Added to playlist: $ABSOLUTE_CLIP_PATH"
+      # Delete the last clip if it exists
+      if [ -n "$LAST_CLIP" ] && [ -f "$LAST_CLIP" ]; then
+        echo "Removing old clip: $LAST_CLIP"
+        rm "$LAST_CLIP"
+      fi
 
-      # Log the playlist file being played
-      echo "Playing playlist: $PLAYLIST_FILE"
-      echo "Contents of playlist file:"
-      echo "$PLAYLIST_FILE"
+      # Send command to mpv to append and play the new clip
+      echo '{ "command": ["loadfile", "'"$CLIP_NAME"'", "append-play"] }' | socat - "$MPV_SOCKET"
 
-      # Play the playlist using mpv
-      mpv --loop-playlist "$PLAYLIST_FILE" || {
-        echo "Error playing playlist with mpv. Check if the format is compatible."
-        exit 1
-      }
+      # Update the last clip variable
+      LAST_CLIP="$CLIP_NAME"
 
-      # Clean up the temporary clip file
-      rm "$CLIP_NAME"
-
-      # Clear the playlist file
-      > "$PLAYLIST_FILE"
+      # Wait for the segment duration before processing the next clip
+      sleep "$SEGMENT_DURATION"
     else
       echo "Video $RANDOM_VIDEO is too short for the segment duration."
     fi
@@ -97,14 +120,23 @@ cleanup() {
   if [ -d "$TEMP_DIR" ]; then
     echo "Removing temporary clips directory: $TEMP_DIR"
     rm -rf "$TEMP_DIR"
-    echo "Removing temporary playlist file: $PLAYLIST_FILE"
-    rm "$PLAYLIST_FILE"
+  fi
+  # Remove the last clip if it exists
+  if [ -n "$LAST_CLIP" ] && [ -f "$LAST_CLIP" ]; then
+    echo "Removing last clip: $LAST_CLIP"
+    rm "$LAST_CLIP"
   fi
   exit 0
 }
 
 # Trap SIGINT (Ctrl+C) and call cleanup function
 trap cleanup SIGINT
+
+# Start mpv in idle mode with IPC server and set the window size
+mpv --idle --input-ipc-server="$MPV_SOCKET" --geometry="${WINDOW_WIDTH}x${WINDOW_HEIGHT}" --autofit=${WINDOW_WIDTH}x${WINDOW_HEIGHT} &
+
+# Give mpv some time to start up
+sleep 1
 
 # Start playing random segments
 play_random_segments

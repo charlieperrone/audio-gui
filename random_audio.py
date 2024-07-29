@@ -2,23 +2,23 @@ from datetime import datetime
 import os
 import random
 import tkinter as tk
+import argparse
 from pydub import AudioSegment
 from pydub.playback import play
-import argparse
 
 SEGMENT_LENGTH = 60000
 
 class AudioMixer:
-    def __init__(self, master, segment_dir, args):
+    def __init__(self, master, seg_dir, a):
         self.master = master
         self.master.title("Two-Track Audio Mixer")
 
         self.title = None
         self.track1 = None
         self.track2 = None
-        self.directory_path = args.directory_path
+        self.directory_path = a.directory_path
 
-        self.title = tk.Label(master, text=f"Segment Directory: {segment_dir}")
+        self.title = tk.Label(master, text=f"Segment Directory: {seg_dir}")
         self.title.pack(pady=5)
 
         self.track1_label = tk.Label(master, text="Track 1: Not loaded")
@@ -46,12 +46,12 @@ class AudioMixer:
         self.mix_button = tk.Button(master, text="Mix and Play", command=self.mix_and_play)
         self.mix_button.pack(pady=20)
 
-        if args.ui_only_mode != True:
+        if not a.ui_only_mode:
             # Load directory after UI elements are created
-            self.load_directory()
+            self.load_directory(seg_dir)
         
-    def load_directory(self):
-        self.select_random_tracks(self.directory_path, segment_dir)
+    def load_directory(self, seg_dir):
+        self.select_random_tracks(self.directory_path, seg_dir)
 
     def select_random_tracks(self, directory_path, segment_path):
         audio_files = [f for f in os.listdir(directory_path) if f.endswith(('.mp3', '.wav', '.ogg'))]

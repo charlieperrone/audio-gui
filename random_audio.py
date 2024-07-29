@@ -1,24 +1,28 @@
+from datetime import datetime
+import os
+import random
 import tkinter as tk
-from tkinter import filedialog
+import argparse
 from pydub import AudioSegment
 from pydub.playback import play
 
+SEGMENT_LENGTH = 60000
+
 class AudioMixer:
-    def __init__(self, master):
+    def __init__(self, master, seg_dir, a):
         self.master = master
         self.master.title("Two-Track Audio Mixer")
 
+        self.title = None
         self.track1 = None
         self.track2 = None
+        self.directory_path = a.directory_path
 
-        self.load_button1 = tk.Button(master, text="Load Track 1", command=self.load_track1)
-        self.load_button1.pack(pady=10)
+        self.title = tk.Label(master, text=f"Segment Directory: {seg_dir}")
+        self.title.pack(pady=5)
 
         self.track1_label = tk.Label(master, text="Track 1: Not loaded")
         self.track1_label.pack(pady=5)
-
-        self.load_button2 = tk.Button(master, text="Load Track 2", command=self.load_track2)
-        self.load_button2.pack(pady=10)
 
         self.track2_label = tk.Label(master, text="Track 2: Not loaded")
         self.track2_label.pack(pady=5)
@@ -31,37 +35,59 @@ class AudioMixer:
         self.volume2.set(100)
         self.volume2.pack(pady=10)
 
-        self.pan1 = tk.Scale(master, from_=-100, to=100, orient=tk.HORIZONTAL, label="Pan Track 1 (Left to Right)")
-        self.pan1.set(0)
+        self.pan1 = tk.Scale(master, from_=-64, to=64, orient=tk.HORIZONTAL, label="Pan Track 1 (Left to Right)")
+        self.pan1.set(random.randint(-64, 64))
         self.pan1.pack(pady=10)
 
-        self.pan2 = tk.Scale(master, from_=-100, to=100, orient=tk.HORIZONTAL, label="Pan Track 2 (Left to Right)")
-        self.pan2.set(0)
+        self.pan2 = tk.Scale(master, from_=-64, to=64, orient=tk.HORIZONTAL, label="Pan Track 2 (Left to Right)")
+        self.pan2.set(random.randint(-64, 64))
         self.pan2.pack(pady=10)
 
         self.mix_button = tk.Button(master, text="Mix and Play", command=self.mix_and_play)
         self.mix_button.pack(pady=20)
 
-    def load_track1(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Audio Files", "*.mp3 *.wav *.ogg")])
-        if file_path:
-            self.track1 = AudioSegment.from_file(file_path)
-            self.track1_label.config(text=f"Track 1: {file_path}")
+        if not a.ui_only_mode:
+            # Load directory after UI elements are created
+            self.load_directory(seg_dir)
+        
+    def load_directory(self, seg_dir):
+        self.select_random_tracks(self.directory_path, seg_dir)
 
-    def load_track2(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Audio Files", "*.mp3 *.wav *.ogg")])
-        if file_path:
-            self.track2 = AudioSegment.from_file(file_path)
-            self.track2_label.config(text=f"Track 2: {file_path}")
+    def select_random_tracks(self, directory_path, segment_path):
+        audio_files = [f for f in os.listdir(directory_path) if f.endswith(('.mp3', '.wav', '.ogg'))]
+        if len(audio_files) < 2:
+            print("Not enough audio files in the directory.")
+            return
+        
+        track1_file = random.choice(audio_files)
+        track2_file = random.choice([f for f in audio_files if f != track1_file])
+        
+        self.track1 = self.get_random_segment(os.path.join(directory_path, track1_file))
+        self.track2 = self.get_random_segment(os.path.join(directory_path, track2_file))
+        
+        segment_1_filename = f"seg1_{track1_file}"
+        segment_2_filename = f"seg2_{track2_file}"
+
+        self.track1.export(os.path.join(segment_path, segment_1_filename))
+        self.track2.export(os.path.join(segment_path, segment_2_filename))
+
+        self.track1_label.config(text=f"Track 1: {segment_1_filename}")
+        self.track2_label.config(text=f"Track 2: {segment_2_filename}")
+
+    def get_random_segment(self, file_path):
+        audio = AudioSegment.from_file(file_path)
+        if len(audio) < SEGMENT_LENGTH:
+            print(f"Audio file {file_path} is shorter than SEGMENT_LENGTH.")
+            return audio
+        start_time = random.randint(0, len(audio) - SEGMENT_LENGTH)
+        return audio[start_time:start_time + SEGMENT_LENGTH]
 
     def ensure_stereo(self, track):
-        # If the track is mono, duplicate the mono channel to create a stereo track
         if track.channels == 1:
             return AudioSegment.from_mono_audiosegments(track, track)
         return track
 
     def apply_pan(self, track, pan):
-        # Pan value ranges from -100 (left) to 100 (right)
         pan_value = pan / 100
         track = self.ensure_stereo(track)
         left, right = track.split_to_mono()
@@ -78,23 +104,34 @@ class AudioMixer:
             pan1_val = self.pan1.get()
             pan2_val = self.pan2.get()
 
-            # Adjust volumes
             track1 = self.track1 - (1 - track1_vol) * 20
             track2 = self.track2 - (1 - track2_vol) * 20
 
-            # Apply panning
             track1 = self.apply_pan(track1, pan1_val)
             track2 = self.apply_pan(track2, pan2_val)
 
-            # Mix tracks
             mixed = track1.overlay(track2)
 
-            # Play mixed track
             play(mixed)
         else:
             print("Please load both tracks first.")
 
 if __name__ == "__main__":
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description="Two-Track Audio Mixer")
+    parser.add_argument("directory_path", type=str, help="The directory path containing audio files")
+    parser.add_argument("--ui_only_mode", type=bool, help="Flag to run in UI only mode, for testing")
+
+    # Parse arguments
+    args = parser.parse_args()
+
+    # Create the segment directory
+    now = datetime.now()
+    formatted_time = now.strftime("%Y-%m-%d_%H-%M-%S")
+    segment_dir = f"./segments/{formatted_time}"
+    os.makedirs(segment_dir, exist_ok=True)
+
+    # Create Tkinter root window
     root = tk.Tk()
-    app = AudioMixer(root)
+    app = AudioMixer(root, segment_dir, args)
     root.mainloop()

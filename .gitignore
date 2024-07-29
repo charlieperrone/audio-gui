@@ -1,2 +1,4 @@
 videos/*
+audio/*
+segments/*
 .venv/*

@@ -4,7 +4,7 @@
 VIDEO_DIR="./videos"
 
 # Duration of the random segment in seconds
-SEGMENT_DURATION=5
+SEGMENT_DURATION=20
 
 # Temporary directories for short video clips
 TEMP_DIR="./temp_clips"

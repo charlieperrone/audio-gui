@@ -2,3 +2,4 @@ videos/*
 audio/*
 segments/*
 .venv/*
+temp_clips/*

@@ -3,6 +3,10 @@
 # Directory containing video files
 VIDEO_DIR="./videos"
 
+# Directory to save the video segments
+SEGMENTS_DIR="./video_segments"
+mkdir -p "$SEGMENTS_DIR"
+
 # Duration of the random segment in seconds
 SEGMENT_DURATION=5
 
@@ -20,6 +24,15 @@ WINDOW_HEIGHT=600
 # Variable to keep track of the last clip
 LAST_CLIP=""
 
+# Function to generate a unique name for the clip based on original filename and start time
+generate_clip_name() {
+  local original_filename=$(basename "$1")
+  local start_time=$2
+  local minutes=$(printf "%02d" $((start_time / 60)))
+  local seconds=$(printf "%02d" $((start_time % 60)))
+  echo "$SEGMENTS_DIR/${original_filename%.mp4}_${minutes}${seconds}.mp4"
+}
+
 # Preload and return the path of a new clip
 preload_clip() {
   RANDOM_VIDEO=${VIDEO_FILES[$RANDOM % ${#VIDEO_FILES[@]}]}
@@ -31,7 +44,7 @@ preload_clip() {
     else
       START_TIME=0
     fi
-    CLIP_NAME="$TEMP_DIR/clip_$(date +%s).mp4"
+    CLIP_NAME=$(generate_clip_name "$RANDOM_VIDEO" "$START_TIME")
     ffmpeg -ss "$START_TIME" -t "$SEGMENT_DURATION" -i "$RANDOM_VIDEO" -c:v libx264 -preset veryfast -crf 23 -c:a aac "$CLIP_NAME" -y
     if [ -f "$CLIP_NAME" ]; then
       echo '{ "command": ["loadfile", "'"$CLIP_NAME"'", "replace"] }' | socat - "$MPV_SOCKET"
@@ -74,8 +87,8 @@ play_random_segments() {
       fi
       echo "Start time: $START_TIME seconds"
 
-      # Generate a temporary clip file with absolute path
-      CLIP_NAME="$TEMP_DIR/clip_$(date +%s).mp4"
+      # Generate a unique clip file name with absolute path
+      CLIP_NAME=$(generate_clip_name "$RANDOM_VIDEO" "$START_TIME")
       echo "Creating clip: $CLIP_NAME from $RANDOM_VIDEO (Start: $START_TIME, Duration: $SEGMENT_DURATION)"
 
       # Extract the 5-second segment using ffmpeg
@@ -92,12 +105,6 @@ play_random_segments() {
         echo "Invalid file format or encoding: $CLIP_NAME"
         rm "$CLIP_NAME"
         continue
-      fi
-
-      # Delete the last clip if it exists
-      if [ -n "$LAST_CLIP" ] && [ -f "$LAST_CLIP" ]; then
-        echo "Removing old clip: $LAST_CLIP"
-        rm "$LAST_CLIP"
       fi
 
       # Send command to mpv to append and play the new clip
